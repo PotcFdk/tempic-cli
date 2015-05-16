@@ -67,7 +67,7 @@ type testResponse struct {
 
 
 func testAction (c *cli.Context) {
-	re := regexp.MustCompile("(https?://[\\w.]+)/?")
+	re := regexp.MustCompile ("(https?://[\\w.]+)/?")
 	host_match := re.FindStringSubmatch (c.GlobalString ("host"))
 	
 	if len (host_match) == 0 || host_match[1] == "" {
