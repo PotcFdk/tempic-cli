@@ -17,13 +17,18 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
+	"io"
+	"log"
 	"os"
 	"regexp"
 	
 	"encoding/json"
 	"io/ioutil"
+	"mime/multipart"
 	"net/http"
+	"path/filepath"
 	
 	"github.com/codegangsta/cli"
 )
@@ -52,6 +57,29 @@ func main () {
 			Usage:     "Checks if the host is reachable and working",
 			Action:    testAction,
 		},
+		{
+			Name:      "upload",
+			ShortName: "up",
+			Usage:     "Uploads one or multiple file(s) and creates an album",
+			Action:    uploadAction,
+			Flags: []cli.Flag {
+				cli.StringFlag{
+					Name:  "lifetime",
+					Value: "default",
+					Usage: "Album lifetime",
+				},
+				cli.StringFlag{
+					Name:  "title",
+					Value: "",
+					Usage: "Album title",
+				},
+				cli.StringFlag{
+					Name:  "description, desc",
+					Value: "",
+					Usage: "Album description",
+				},
+			},
+		},
 	}
 	
 	app.Action = func (c *cli.Context)  {
@@ -61,25 +89,32 @@ func main () {
 	app.Run (os.Args)
 }
 
-type testResponse struct {
-    Status string
+func cleanUrl (url string) (bool, string) {
+	re := regexp.MustCompile ("(https?://[\\w.]+)/?")
+	url_match := re.FindStringSubmatch (url)
+	
+	if len (url_match) == 0 || url_match[1] == "" {
+		return false, "empty url"
+	}
+	url = url_match[1]
+	
+	return true, url
 }
 
+type testResponse struct {
+	Status string
+}
 
 func testAction (c *cli.Context) {
-	re := regexp.MustCompile ("(https?://[\\w.]+)/?")
-	host_match := re.FindStringSubmatch (c.GlobalString ("host"))
-	
-	if len (host_match) == 0 || host_match[1] == "" {
+	host_ok, host := cleanUrl (c.GlobalString ("host"))
+	if !host_ok {
 		fmt.Println ("Please specify a host.")
 		return
 	}
 	
-	host := host_match[1]
-	
 	fmt.Println ("Testing API of instance: ", host)
 
-	resp, err := http.Get (host + "/api.php?action=test")
+	resp, err := http.Get (host + "/api.php?v1/system/test")
 	
 	if err != nil {
 		fmt.Println ("Error in HTTP request: ", err)
@@ -99,5 +134,87 @@ func testAction (c *cli.Context) {
 			fmt.Println ("OK")
 		default:
 			fmt.Println ("ERROR")
+	}
+}
+
+func uploadAction (c *cli.Context) {
+	// Get the host
+	
+	host_ok, host := cleanUrl (c.GlobalString ("host"))
+	if !host_ok {
+		fmt.Println ("Please specify a host.")
+		return
+	}
+	
+	// Print information.
+	
+	fmt.Println ("album_name = " + c.String ("title"))
+	fmt.Println ("album_description = " + c.String ("description"))
+	fmt.Println ("lifetime = " + c.String ("lifetime"))
+	
+	fmt.Printf ("uploading files: ")
+	for _, arg := range c.Args() {
+		fmt.Printf (" " + arg)
+	}
+	fmt.Println ("\n--")
+
+	// Set the URI.
+	
+	uri := host + "/upload.php"
+	
+	// And go!
+	
+	params := map[string]string {
+		"ajax": "true",
+		"lifetime": c.String ("lifetime"),
+		"album_name": c.String ("title"),
+		"album_description": c.String ("description"),
+	}
+	
+	path := c.Args()[0]
+	
+	file, err := os.Open (path)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter (body)
+	part, err := writer.CreateFormFile ("file[]", filepath.Base (path))
+	if err != nil {
+		return
+	}
+	_, err = io.Copy (part, file)
+ 
+	for key, val := range params {
+		_ = writer.WriteField (key, val)
+	}
+	err = writer.Close()
+	if err != nil {
+		return
+	}
+	
+	request, err := http.NewRequest ("POST", uri, body)
+	request.Header.Add("Content-Type", writer.FormDataContentType())
+	
+	fmt.Println (request)
+	
+	client := &http.Client{}
+	resp, err := client.Do(request)
+
+	if err != nil {
+		log.Fatal(err)
+	} else {
+		body := &bytes.Buffer{}
+		_, err := body.ReadFrom(resp.Body)
+		if err != nil {
+			log.Fatal(err)
+		}
+		resp.Body.Close()
+		fmt.Println(resp.StatusCode)
+		fmt.Println(resp.Header)
+ 
+		fmt.Println(body)
 	}
 }
