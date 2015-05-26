@@ -58,6 +58,18 @@ func main () {
 			Action:    testAction,
 		},
 		{
+			Name:      "info",
+			ShortName: "i",
+			Usage:     "Displays album information",
+			Action:    infoAction,
+			Flags: []cli.Flag {
+				cli.StringFlag{
+					Name:  "album-id",
+					Usage: "Album ID",
+				},
+			},
+		},
+		{
 			Name:      "upload",
 			ShortName: "up",
 			Usage:     "Uploads one or multiple file(s) and creates an album",
@@ -101,6 +113,8 @@ func cleanUrl (url string) (bool, string) {
 	return true, url
 }
 
+// Test
+
 type testResponse struct {
 	Status string
 }
@@ -136,6 +150,80 @@ func testAction (c *cli.Context) {
 			fmt.Println ("ERROR")
 	}
 }
+
+// Info
+
+type fileInfo struct {
+	Url string
+	Extension string
+	IsImage bool
+	Thumbnail string
+	Checksums map[string]string
+}
+
+type albumInfo struct {
+	Name string
+	Description string
+	Files map[string]fileInfo
+}
+
+type infoResponseData struct {
+	Albums map[string]albumInfo
+}
+
+type infoResponse struct {
+	Status string
+	Version string
+	Data infoResponseData
+}
+
+func infoAction (c *cli.Context) {
+	host_ok, host := cleanUrl (c.GlobalString ("host"))
+	if !host_ok {
+		fmt.Println ("Please specify a host.")
+		return
+	}
+	
+	album_id := c.String ("album-id")
+	
+	fmt.Println ("album_id = " + c.String ("album-id"))
+	resp, err := http.Get (host + "/api.php?v1/albums/" + album_id + "/info")
+	
+	if err != nil {
+		fmt.Println ("Error in HTTP request: ", err)
+	}
+	
+	defer resp.Body.Close()
+	body, err := ioutil.ReadAll (resp.Body)
+	
+	//fmt.Println ("Raw response: ", string (body))
+	
+	respStruct := &infoResponse{}
+	
+	json.Unmarshal (body, &respStruct)
+	
+	switch respStruct.Status {
+		case "success":
+			fmt.Println ("ANSWER OK")
+		default:
+			fmt.Println ("ERROR")
+			return
+	}
+	
+	var album_info albumInfo = respStruct.Data.Albums[album_id]
+	
+	fmt.Println ("* Album name: " + album_info.Name)
+	fmt.Println ("* Album description: " + album_info.Description)
+	fmt.Println ("* Files in album:")
+	
+	for name, file_info := range album_info.Files {
+		fmt.Println ("- " + name + ": ")
+		fmt.Println ("  URL: " + file_info.Url)
+		fmt.Println ("  SHA-1: " + file_info.Checksums["sha1"])
+	}
+}
+
+// Upload
 
 func uploadAction (c *cli.Context) {
 	// Get the host
